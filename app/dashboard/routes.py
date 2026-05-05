@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from app.database import get_db, Message, Post, SocialPost
-from app import onlyfans, persona
+from app import fanvue, persona
 import os
 
 router = APIRouter()
@@ -22,7 +22,7 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
     )
 
     try:
-        subscribers = onlyfans.get_fans(limit=100)
+        subscribers = fanvue.get_fans(limit=100)
         subscriber_count = len(subscribers)
     except Exception:
         subscriber_count = "—"

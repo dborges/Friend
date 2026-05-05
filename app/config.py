@@ -4,6 +4,8 @@ import os
 load_dotenv()
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+FANVUE_ACCESS_TOKEN = os.getenv("FANVUE_ACCESS_TOKEN", "")
+FANVUE_CREATOR_UUID = os.getenv("FANVUE_CREATOR_UUID", "")
 ONLYFANS_API_KEY = os.getenv("ONLYFANS_API_KEY", "")
 ONLYFANS_ACCOUNT_ID = os.getenv("ONLYFANS_ACCOUNT_ID", "")  # format: acct_XXXXXXXXXXXXXXX
 REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN", "")
@@ -29,7 +31,7 @@ TWITTER_API_SECRET = os.getenv("TWITTER_API_SECRET", "")
 TWITTER_ACCESS_TOKEN = os.getenv("TWITTER_ACCESS_TOKEN", "")
 TWITTER_ACCESS_SECRET = os.getenv("TWITTER_ACCESS_SECRET", "")
 
-OF_PROFILE_URL = os.getenv("OF_PROFILE_URL", "https://onlyfans.com/heathermia")
+PROFILE_URL = os.getenv("PROFILE_URL", os.getenv("OF_PROFILE_URL", ""))
 
 PERSONA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "persona")
 GENERATED_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "generated")

@@ -17,7 +17,7 @@ python run.py
 
 ## Architecture
 
-**Friend** is an AI persona automation system. A character ("Sophia") lives on OnlyFans — Claude handles all subscriber DMs in-character, Flux generates photos, ElevenLabs generates voice messages, and APScheduler drives everything automatically.
+**Friend** is an AI persona automation system. A character lives on Fanvue — Claude handles all subscriber DMs in-character, Flux generates photos, ElevenLabs generates voice messages, and APScheduler drives everything automatically.
 
 ### The 4 Persona Files (`persona/`)
 
@@ -36,18 +36,18 @@ Call `POST /dashboard/persona/reload` (or click "Reload Persona" in the dashboar
 
 ```
 APScheduler (every 30s)
-  → onlyfans.get_unread_chats()          # onlyfansapi.com REST API
+  → fanvue.get_chats()                    # Fanvue REST API (unread chats)
   → database.is_processed()              # skip already-handled messages
   → claude.generate_reply()              # Claude builds reply from persona + history
   → flux.generate_image() [optional]     # triggered by image request keywords in message
   → elevenlabs.generate_voice() [opt]    # triggered by voice request keywords
-  → onlyfans.send_message_with_media()   # sends reply + any generated media
+  → fanvue.send_message_with_media()     # sends reply + any generated media
   → database.save_message()             # stores both sides of conversation
 ```
 
 ### Key Modules
 
-- `app/onlyfans.py` — REST client for [onlyfansapi.com](https://onlyfansapi.com). All OF interaction goes through here. Auth uses `ONLYFANS_API_KEY` (Bearer token) + `ONLYFANS_AUTH_COOKIE` (your session cookie).
+- `app/fanvue.py` — REST client for the [Fanvue API](https://api.fanvue.com/docs). All platform interaction goes through here. Auth uses `FANVUE_ACCESS_TOKEN` (OAuth Bearer token). Chats are identified by `user.uuid`; media upload uses a multipart session flow.
 - `app/claude.py` — Generates DM replies and feed captions. Also detects image/voice trigger phrases via regex.
 - `app/scheduler.py` — Two jobs: `poll_and_reply` (interval) and `post_to_feed` (cron, configurable times).
 - `app/database.py` — SQLite via SQLAlchemy. Stores all messages (both directions) and feed posts. `is_processed()` prevents double-replies.
@@ -59,19 +59,29 @@ Copy `.env.example` to `.env` and fill in:
 
 ```
 ANTHROPIC_API_KEY=          # claude.ai API key
-ONLYFANS_API_KEY=           # from onlyfansapi.com dashboard
-ONLYFANS_USER_ID=           # your OF creator user ID
-ONLYFANS_AUTH_COOKIE=       # sess cookie from logged-in OF browser session
+FANVUE_ACCESS_TOKEN=        # OAuth access token from Fanvue Developer Area
+FANVUE_CREATOR_UUID=        # your creator user UUID (from Fanvue creator settings)
 REPLICATE_API_TOKEN=        # replicate.com (Flux image generation)
 ELEVENLABS_API_KEY=         # elevenlabs.io
 ELEVENLABS_VOICE_ID=        # clone a voice first, paste the ID here
 POLL_INTERVAL_SECONDS=30    # how often to check for new DMs
 POST_SCHEDULE=09:00,15:00,21:00  # times to auto-post to feed (24h, comma-separated)
+PROFILE_URL=                # your Fanvue profile URL (used in Reddit/Twitter promos)
 ```
+
+### Fanvue API Notes
+
+- API version header required on every request: `X-Fanvue-API-Version: 2025-06-26`
+- Chats are keyed by subscriber `user.uuid` (not a separate chat ID)
+- Messages use `uuid` field (not `id`)
+- `send_message` returns `{"messageUuid": "..."}` 
+- `create_post` returns `{"uuid": "..."}` 
+- Media upload (`upload_media`) uses a 4-step multipart session flow — verify exact endpoint paths against the live API docs once you have credentials
+- OAuth scopes needed: `read:chat`, `write:chat`, `read:fan`, `write:post`, `write:creator`, `write:media`, `read:creator`
 
 ### Content Tiers
 
-Subscriber tier is read from the OnlyFans API and stored per-message. `rules.md` defines what's allowed at each tier (`standard`, `intimate`, `premium`). Claude receives the tier in its system prompt and respects the limits defined there.
+`rules.md` defines what's allowed at each tier (`standard`, `intimate`, `premium`). Claude receives the tier in its system prompt and respects the limits defined there. Note: Fanvue's API does not currently return a subscription tier per-subscriber, so all subscribers default to `standard` until tier detection is implemented.
 
 ### Adding a New Persona
 

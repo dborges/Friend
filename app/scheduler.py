@@ -1,12 +1,12 @@
 import logging
 import random
 from apscheduler.schedulers.background import BackgroundScheduler
-from app import onlyfans, claude, flux, elevenlabs
+from app import fanvue, claude, flux, elevenlabs
 from app.database import SessionLocal, get_conversation_history, save_message, is_processed, SocialPost
 from app.config import (
     POLL_INTERVAL_SECONDS, POST_SCHEDULE,
     REDDIT_CLIENT_ID, REDDIT_PROMO_SUBS, REDDIT_ORGANIC_SUBS,
-    TWITTER_API_KEY, OF_PROFILE_URL,
+    TWITTER_API_KEY, PROFILE_URL,
 )
 
 log = logging.getLogger(__name__)
@@ -15,32 +15,32 @@ log = logging.getLogger(__name__)
 def poll_and_reply():
     db = SessionLocal()
     try:
-        chats = onlyfans.get_chats()
+        chats = fanvue.get_chats()
         for chat in chats:
-            chat_id = str(chat.get("id", chat.get("chatId", "")))
-            fan = chat.get("withUser", chat.get("fan", {}))
-            subscriber_id = str(fan.get("id", ""))
-            subscriber_name = fan.get("name", fan.get("username", ""))
+            user = chat.get("user", {})
+            subscriber_id = user.get("uuid", "")
+            subscriber_name = user.get("displayName") or user.get("handle", "")
             subscriber_tier = "standard"
 
-            messages = onlyfans.get_chat_messages(chat_id, limit=1)
+            if not subscriber_id:
+                continue
+
+            messages = fanvue.get_chat_messages(subscriber_id, limit=1)
             if not messages:
                 continue
 
             latest = messages[0]
-            of_message_id = str(latest["id"])
-            content = latest.get("text", "").strip()
+            message_id = str(latest.get("uuid", ""))
+            content = (latest.get("text") or "").strip()
 
             if not content:
                 continue
-            if is_processed(db, of_message_id):
+            if is_processed(db, message_id):
                 continue
 
-            # Save the incoming message
-            save_message(db, of_message_id, subscriber_id, subscriber_name,
+            save_message(db, message_id, subscriber_id, subscriber_name,
                          subscriber_tier, "user", content)
 
-            # Build history and generate reply
             history = get_conversation_history(db, subscriber_id)
             result = claude.generate_reply(subscriber_name, subscriber_tier, history[:-1], content)
 
@@ -50,7 +50,7 @@ def poll_and_reply():
             if result["wants_image"]:
                 try:
                     image_path = flux.generate_image()
-                    media_id = onlyfans.upload_media(image_path)
+                    media_id = fanvue.upload_media(image_path)
                     media_ids.append(media_id)
                 except Exception as e:
                     log.error("Image generation failed: %s", e)
@@ -58,19 +58,18 @@ def poll_and_reply():
             if result["wants_voice"]:
                 try:
                     audio_path = elevenlabs.generate_voice(reply_text)
-                    media_id = onlyfans.upload_media(audio_path)
+                    media_id = fanvue.upload_media(audio_path)
                     media_ids.append(media_id)
                 except Exception as e:
                     log.error("Voice generation failed: %s", e)
 
-            # Send reply
             try:
                 if media_ids:
-                    sent = onlyfans.send_message_with_media(chat_id, reply_text, media_ids)
+                    sent = fanvue.send_message_with_media(subscriber_id, reply_text, media_ids)
                 else:
-                    sent = onlyfans.send_message(chat_id, reply_text)
+                    sent = fanvue.send_message(subscriber_id, reply_text)
 
-                reply_id = str(sent.get("id", f"reply_{of_message_id}"))
+                reply_id = str(sent.get("messageUuid", f"reply_{message_id}"))
                 save_message(db, reply_id, subscriber_id, subscriber_name,
                              subscriber_tier, "assistant", reply_text)
                 log.info("Replied to %s (%s)", subscriber_name, subscriber_id)
@@ -87,9 +86,9 @@ def post_to_feed():
     try:
         caption = claude.generate_feed_caption()
         image_path = flux.generate_image("lifestyle photo, Miami, golden hour, casual and candid")
-        media_id = onlyfans.upload_media(image_path)
-        result = onlyfans.create_post(caption, [media_id])
-        log.info("Posted to feed: %s", result.get("id"))
+        media_id = fanvue.upload_media(image_path)
+        result = fanvue.create_post(caption, [media_id])
+        log.info("Posted to feed: %s", result.get("uuid"))
     except Exception as e:
         log.error("Feed post failed: %s", e)
 
@@ -101,7 +100,7 @@ def post_to_reddit_promo():
         from app import reddit
         sub = random.choice(REDDIT_PROMO_SUBS)
         image_path = flux.generate_image("lifestyle photo, Miami beach, candid, natural light")
-        post_data = claude.generate_reddit_post(sub, OF_PROFILE_URL)
+        post_data = claude.generate_reddit_post(sub, PROFILE_URL)
         url = reddit.post_image_to_sub(sub, post_data["title"], image_path)
         db = SessionLocal()
         try:
@@ -121,7 +120,7 @@ def comment_on_reddit_organic():
     try:
         from app import reddit
         sub = random.choice(REDDIT_ORGANIC_SUBS)
-        post_data = claude.generate_reddit_post(sub, OF_PROFILE_URL)
+        post_data = claude.generate_reddit_post(sub, PROFILE_URL)
         url = reddit.comment_on_top_post(sub, post_data["body"])
         if url:
             db = SessionLocal()
@@ -150,7 +149,7 @@ def post_to_twitter():
         ]
         scene = random.choice(scenes)
         image_path = flux.generate_image(f"lifestyle photo, {scene}, natural light, candid")
-        tweet_text = claude.generate_tweet(scene, OF_PROFILE_URL)
+        tweet_text = claude.generate_tweet(scene, PROFILE_URL)
         url = twitter.post_tweet(tweet_text, image_path)
         db = SessionLocal()
         try:

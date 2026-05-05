@@ -3,7 +3,7 @@ import praw
 from app.config import (
     REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET,
     REDDIT_USERNAME, REDDIT_PASSWORD, REDDIT_USER_AGENT,
-    OF_PROFILE_URL,
+    PROFILE_URL,
 )
 
 log = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ def post_link_to_sub(subreddit: str, title: str, body: str) -> str:
     """Submit a text post with OF link in body. Returns the post URL."""
     r = _client()
     sub = r.subreddit(subreddit)
-    full_body = f"{body}\n\n{OF_PROFILE_URL}"
+    full_body = f"{body}\n\n{PROFILE_URL}"
     submission = sub.submit(title=title, selftext=full_body)
     log.info("Posted text to r/%s: %s", subreddit, submission.url)
     return submission.url
