@@ -1,7 +1,8 @@
 .env
-*.db
 __pycache__/
 *.pyc
-.venv/
-venv/
+*.pyo
 generated/
+fanvue_explore/
+screenshots/
+*.db
