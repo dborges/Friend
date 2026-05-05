@@ -55,8 +55,13 @@ def upload_zip(zip_path: str) -> str:
 
 
 def get_replicate_username() -> str:
-    account = replicate.account.current()
-    return account.username
+    import httpx
+    resp = httpx.get(
+        "https://api.replicate.com/v1/account",
+        headers={"Authorization": f"Bearer {REPLICATE_API_TOKEN}"},
+        timeout=10,
+    )
+    return resp.json()["username"]
 
 
 def start_training(zip_url: str, username: str):
