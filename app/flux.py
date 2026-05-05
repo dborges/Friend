@@ -35,6 +35,53 @@ def _get_appearance() -> str:
     return _APPEARANCE
 
 
+def generate_image_url(scene_context: str = "mirror selfie at home, casual outfit") -> tuple[str, str]:
+    """Like generate_image() but also returns the Replicate public URL.
+    Returns (local_path, public_url). URL is valid ~24h — enough for Threads posting."""
+    lora_model = os.getenv("LORA_MODEL", _LORA_MODEL)
+    candid_style = random.choice(_CANDID_STYLES)
+
+    if lora_model:
+        if ":" not in lora_model:
+            model = replicate.models.get(lora_model)
+            lora_ref = f"{lora_model}:{model.latest_version.id}"
+        else:
+            lora_ref = lora_model
+        prompt = f"HEATHER, {scene_context}, {candid_style}"
+        output = replicate.run(lora_ref, input={
+            "prompt": prompt, "aspect_ratio": "2:3", "output_format": "jpg",
+            "lora_scale": 1.0, "num_inference_steps": 28, "guidance_scale": 3.5,
+        })
+    else:
+        appearance = _get_appearance()
+        prompt = (
+            f"young woman, {appearance}, {scene_context}, {candid_style}, "
+            "not a model, real person, no studio lighting"
+        )
+        output = replicate.run(
+            "black-forest-labs/flux-1.1-pro",
+            input={"prompt": prompt, "aspect_ratio": "2:3", "output_format": "jpg"},
+        )
+
+    filename = f"image_{os.urandom(6).hex()}.jpg"
+    dest = os.path.join(GENERATED_DIR, filename)
+
+    if isinstance(output, list):
+        file_output = output[0]
+        public_url = str(file_output)
+        with open(dest, "wb") as f:
+            f.write(file_output.read())
+    else:
+        public_url = str(output)
+        with httpx.Client() as client:
+            resp = client.get(public_url, timeout=60)
+            resp.raise_for_status()
+            with open(dest, "wb") as f:
+                f.write(resp.content)
+
+    return dest, public_url
+
+
 def generate_image(scene_context: str = "mirror selfie at home, casual outfit") -> str:
     lora_model = os.getenv("LORA_MODEL", _LORA_MODEL)
     candid_style = random.choice(_CANDID_STYLES)

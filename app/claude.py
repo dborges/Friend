@@ -66,6 +66,28 @@ def generate_welcome_message(subscriber_name: str) -> str:
     return response.content[0].text.strip()
 
 
+def generate_threads_post(scene_context: str = "", profile_url: str = "") -> str:
+    """Short Threads post — lifestyle, relatable, soft CTA. Under 400 chars."""
+    system_prompt = load_system_prompt()
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=120,
+        temperature=0.92,
+        system=system_prompt,
+        messages=[{
+            "role": "user",
+            "content": (
+                "Write a single Threads post as Heather. "
+                f"Context: {scene_context or 'a casual Miami moment'}. "
+                "Conversational, real, maybe a little flirty or funny. "
+                "Under 400 characters. No hashtags. "
+                + (f"End with a soft nod toward her Fanvue: {profile_url}" if profile_url else "")
+            ),
+        }],
+    )
+    return response.content[0].text.strip()
+
+
 def generate_ppv_pitch(price_dollars: int = 15) -> str:
     """Mass PPV message — teases locked content, creates urgency."""
     system_prompt = load_system_prompt()

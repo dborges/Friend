@@ -26,6 +26,12 @@ REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "Friend/1.0")
 REDDIT_PROMO_SUBS = os.getenv("REDDIT_PROMO_SUBS", "OnlyFansPromotion,SFWNextDoor").split(",")
 REDDIT_ORGANIC_SUBS = os.getenv("REDDIT_ORGANIC_SUBS", "relationship_advice,dating_advice").split(",")
 
+# Threads (Meta)
+THREADS_APP_ID       = os.getenv("THREADS_APP_ID", "")
+THREADS_APP_SECRET   = os.getenv("THREADS_APP_SECRET", "")
+THREADS_USER_ID      = os.getenv("THREADS_USER_ID", "")
+THREADS_ACCESS_TOKEN = os.getenv("THREADS_ACCESS_TOKEN", "")
+
 # Twitter/X
 TWITTER_API_KEY = os.getenv("TWITTER_API_KEY", "")
 TWITTER_API_SECRET = os.getenv("TWITTER_API_SECRET", "")

@@ -9,7 +9,7 @@ from app.database import (
 from app.config import (
     POLL_INTERVAL_SECONDS, POST_SCHEDULE, PPV_PRICE_CENTS,
     REDDIT_CLIENT_ID, REDDIT_PROMO_SUBS, REDDIT_ORGANIC_SUBS,
-    TWITTER_API_KEY, PROFILE_URL,
+    TWITTER_API_KEY, THREADS_ACCESS_TOKEN, PROFILE_URL,
 )
 
 log = logging.getLogger(__name__)
@@ -211,6 +211,33 @@ def send_ppv_blast():
         log.error("PPV blast failed: %s", e)
 
 
+def post_to_threads():
+    if not THREADS_ACCESS_TOKEN:
+        return
+    try:
+        from app import threads
+        scenes = [
+            "morning yoga on the Miami balcony",
+            "iced coffee and laptop at a local cafe",
+            "sunset walk on the boardwalk",
+            "beach afternoon, golden hour",
+            "cozy night in, candles and a show",
+        ]
+        scene = random.choice(scenes)
+        text = claude.generate_threads_post(scene, PROFILE_URL)
+        _, image_url = flux.generate_image_url(f"lifestyle photo, {scene}, natural light, candid")
+        post_id = threads.post_image(image_url, text)
+        db = SessionLocal()
+        try:
+            db.add(SocialPost(platform="threads", post_url=post_id, caption=text))
+            db.commit()
+        finally:
+            db.close()
+        log.info("Threads post published: %s", post_id)
+    except Exception as e:
+        log.error("Threads post failed: %s", e)
+
+
 def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler()
 
@@ -239,6 +266,13 @@ def start_scheduler() -> BackgroundScheduler:
         scheduler.add_job(comment_on_reddit_organic, "cron", hour=14, minute=0,  id="reddit_organic_2")
         scheduler.add_job(comment_on_reddit_organic, "cron", hour=20, minute=0,  id="reddit_organic_3")
         log.info("Reddit jobs scheduled")
+
+    # Threads — 3x/day (9am, 2pm, 8pm)
+    if THREADS_ACCESS_TOKEN:
+        scheduler.add_job(post_to_threads, "cron", hour=9,  minute=0,  id="threads_1")
+        scheduler.add_job(post_to_threads, "cron", hour=14, minute=0,  id="threads_2")
+        scheduler.add_job(post_to_threads, "cron", hour=20, minute=0,  id="threads_3")
+        log.info("Threads jobs scheduled")
 
     # Twitter — 3x/day (8am, 1pm, 8pm)
     if TWITTER_API_KEY:
