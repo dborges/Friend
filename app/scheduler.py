@@ -1,0 +1,201 @@
+import logging
+import random
+from apscheduler.schedulers.background import BackgroundScheduler
+from app import onlyfans, claude, flux, elevenlabs
+from app.database import SessionLocal, get_conversation_history, save_message, is_processed, SocialPost
+from app.config import (
+    POLL_INTERVAL_SECONDS, POST_SCHEDULE,
+    REDDIT_CLIENT_ID, REDDIT_PROMO_SUBS, REDDIT_ORGANIC_SUBS,
+    TWITTER_API_KEY, OF_PROFILE_URL,
+)
+
+log = logging.getLogger(__name__)
+
+
+def poll_and_reply():
+    db = SessionLocal()
+    try:
+        chats = onlyfans.get_chats()
+        for chat in chats:
+            chat_id = str(chat.get("id", chat.get("chatId", "")))
+            fan = chat.get("withUser", chat.get("fan", {}))
+            subscriber_id = str(fan.get("id", ""))
+            subscriber_name = fan.get("name", fan.get("username", ""))
+            subscriber_tier = "standard"
+
+            messages = onlyfans.get_chat_messages(chat_id, limit=1)
+            if not messages:
+                continue
+
+            latest = messages[0]
+            of_message_id = str(latest["id"])
+            content = latest.get("text", "").strip()
+
+            if not content:
+                continue
+            if is_processed(db, of_message_id):
+                continue
+
+            # Save the incoming message
+            save_message(db, of_message_id, subscriber_id, subscriber_name,
+                         subscriber_tier, "user", content)
+
+            # Build history and generate reply
+            history = get_conversation_history(db, subscriber_id)
+            result = claude.generate_reply(subscriber_name, subscriber_tier, history[:-1], content)
+
+            reply_text = result["text"]
+            media_ids: list[str] = []
+
+            if result["wants_image"]:
+                try:
+                    image_path = flux.generate_image()
+                    media_id = onlyfans.upload_media(image_path)
+                    media_ids.append(media_id)
+                except Exception as e:
+                    log.error("Image generation failed: %s", e)
+
+            if result["wants_voice"]:
+                try:
+                    audio_path = elevenlabs.generate_voice(reply_text)
+                    media_id = onlyfans.upload_media(audio_path)
+                    media_ids.append(media_id)
+                except Exception as e:
+                    log.error("Voice generation failed: %s", e)
+
+            # Send reply
+            try:
+                if media_ids:
+                    sent = onlyfans.send_message_with_media(chat_id, reply_text, media_ids)
+                else:
+                    sent = onlyfans.send_message(chat_id, reply_text)
+
+                reply_id = str(sent.get("id", f"reply_{of_message_id}"))
+                save_message(db, reply_id, subscriber_id, subscriber_name,
+                             subscriber_tier, "assistant", reply_text)
+                log.info("Replied to %s (%s)", subscriber_name, subscriber_id)
+            except Exception as e:
+                log.error("Failed to send reply to %s: %s", subscriber_id, e)
+
+    except Exception as e:
+        log.error("Poll cycle error: %s", e)
+    finally:
+        db.close()
+
+
+def post_to_feed():
+    try:
+        caption = claude.generate_feed_caption()
+        image_path = flux.generate_image("lifestyle photo, Miami, golden hour, casual and candid")
+        media_id = onlyfans.upload_media(image_path)
+        result = onlyfans.create_post(caption, [media_id])
+        log.info("Posted to feed: %s", result.get("id"))
+    except Exception as e:
+        log.error("Feed post failed: %s", e)
+
+
+def post_to_reddit_promo():
+    if not REDDIT_CLIENT_ID:
+        return
+    try:
+        from app import reddit
+        sub = random.choice(REDDIT_PROMO_SUBS)
+        image_path = flux.generate_image("lifestyle photo, Miami beach, candid, natural light")
+        post_data = claude.generate_reddit_post(sub, OF_PROFILE_URL)
+        url = reddit.post_image_to_sub(sub, post_data["title"], image_path)
+        db = SessionLocal()
+        try:
+            db.add(SocialPost(platform="reddit", subreddit=sub, post_url=url,
+                              caption=post_data["title"], image_path=image_path))
+            db.commit()
+        finally:
+            db.close()
+        log.info("Reddit promo posted to r/%s: %s", sub, url)
+    except Exception as e:
+        log.error("Reddit promo failed: %s", e)
+
+
+def comment_on_reddit_organic():
+    if not REDDIT_CLIENT_ID:
+        return
+    try:
+        from app import reddit
+        sub = random.choice(REDDIT_ORGANIC_SUBS)
+        post_data = claude.generate_reddit_post(sub, OF_PROFILE_URL)
+        url = reddit.comment_on_top_post(sub, post_data["body"])
+        if url:
+            db = SessionLocal()
+            try:
+                db.add(SocialPost(platform="reddit", subreddit=sub, post_url=url,
+                                  caption=post_data["body"]))
+                db.commit()
+            finally:
+                db.close()
+            log.info("Reddit organic comment on r/%s: %s", sub, url)
+    except Exception as e:
+        log.error("Reddit organic comment failed: %s", e)
+
+
+def post_to_twitter():
+    if not TWITTER_API_KEY:
+        return
+    try:
+        from app import twitter
+        scenes = [
+            "morning yoga on a Miami balcony",
+            "beach afternoon in Miami",
+            "freelance design work from home",
+            "sunset walk on the boardwalk",
+            "cozy morning coffee",
+        ]
+        scene = random.choice(scenes)
+        image_path = flux.generate_image(f"lifestyle photo, {scene}, natural light, candid")
+        tweet_text = claude.generate_tweet(scene, OF_PROFILE_URL)
+        url = twitter.post_tweet(tweet_text, image_path)
+        db = SessionLocal()
+        try:
+            db.add(SocialPost(platform="twitter", post_url=url,
+                              caption=tweet_text, image_path=image_path))
+            db.commit()
+        finally:
+            db.close()
+        log.info("Tweet posted: %s", url)
+    except Exception as e:
+        log.error("Twitter post failed: %s", e)
+
+
+def start_scheduler() -> BackgroundScheduler:
+    scheduler = BackgroundScheduler()
+
+    scheduler.add_job(poll_and_reply, "interval", seconds=POLL_INTERVAL_SECONDS, id="dm_poller")
+
+    for time_str in POST_SCHEDULE:
+        hour, minute = time_str.strip().split(":")
+        scheduler.add_job(
+            post_to_feed,
+            "cron",
+            hour=int(hour),
+            minute=int(minute),
+            id=f"feed_post_{time_str.replace(':', '')}",
+        )
+
+    # Reddit promo — 2x/day (10am + 6pm)
+    if REDDIT_CLIENT_ID:
+        scheduler.add_job(post_to_reddit_promo, "cron", hour=10, minute=0, id="reddit_promo_am")
+        scheduler.add_job(post_to_reddit_promo, "cron", hour=18, minute=0, id="reddit_promo_pm")
+        # Organic comments — 3x/day
+        scheduler.add_job(comment_on_reddit_organic, "cron", hour=9,  minute=30, id="reddit_organic_1")
+        scheduler.add_job(comment_on_reddit_organic, "cron", hour=14, minute=0,  id="reddit_organic_2")
+        scheduler.add_job(comment_on_reddit_organic, "cron", hour=20, minute=0,  id="reddit_organic_3")
+        log.info("Reddit jobs scheduled")
+
+    # Twitter — 3x/day (8am, 1pm, 8pm)
+    if TWITTER_API_KEY:
+        scheduler.add_job(post_to_twitter, "cron", hour=8,  minute=0,  id="twitter_1")
+        scheduler.add_job(post_to_twitter, "cron", hour=13, minute=0,  id="twitter_2")
+        scheduler.add_job(post_to_twitter, "cron", hour=20, minute=30, id="twitter_3")
+        log.info("Twitter jobs scheduled")
+
+    scheduler.start()
+    log.info("Scheduler started — polling every %ds, posting at %s", POLL_INTERVAL_SECONDS, POST_SCHEDULE)
+    return scheduler
