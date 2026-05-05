@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Integer, Text, DateTime, Boolean, create_engine
+from sqlalchemy import Column, String, Integer, Text, DateTime, Boolean, create_engine, func
 from sqlalchemy.orm import declarative_base, sessionmaker
 from datetime import datetime, timezone
 import os
@@ -32,6 +32,20 @@ class Post(Base):
     image_path = Column(String)
     posted_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     status = Column(String, default="pending")  # pending, posted, failed
+
+
+class Subscriber(Base):
+    __tablename__ = "subscribers"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    subscriber_uuid = Column(String, unique=True, nullable=False)
+    handle = Column(String)
+    display_name = Column(String)
+    first_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    welcome_sent = Column(Boolean, default=False)
+    segment = Column(String, default="lurker")   # lurker | regular | whale
+    total_spent_cents = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class SocialPost(Base):
@@ -88,3 +102,38 @@ def save_message(db, of_message_id: str, subscriber_id: str, subscriber_name: st
 
 def is_processed(db, of_message_id: str) -> bool:
     return db.query(Message).filter(Message.of_message_id == of_message_id).first() is not None
+
+
+# ── Subscriber helpers ────────────────────────────────────────────────────────
+
+def upsert_subscriber(db, uuid: str, handle: str, display_name: str) -> "Subscriber":
+    sub = db.query(Subscriber).filter(Subscriber.subscriber_uuid == uuid).first()
+    if not sub:
+        sub = Subscriber(subscriber_uuid=uuid, handle=handle, display_name=display_name)
+        db.add(sub)
+        db.commit()
+        db.refresh(sub)
+    return sub
+
+
+def get_unwelcomed(db) -> list["Subscriber"]:
+    return db.query(Subscriber).filter(Subscriber.welcome_sent == False).all()
+
+
+def mark_welcome_sent(db, uuid: str):
+    db.query(Subscriber).filter(Subscriber.subscriber_uuid == uuid).update(
+        {"welcome_sent": True, "updated_at": datetime.now(timezone.utc)}
+    )
+    db.commit()
+
+
+def get_segment(db, uuid: str) -> str:
+    sub = db.query(Subscriber).filter(Subscriber.subscriber_uuid == uuid).first()
+    return sub.segment if sub else "lurker"
+
+
+def set_segment(db, uuid: str, segment: str):
+    db.query(Subscriber).filter(Subscriber.subscriber_uuid == uuid).update(
+        {"segment": segment, "updated_at": datetime.now(timezone.utc)}
+    )
+    db.commit()

@@ -15,6 +15,7 @@ ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "")
 
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "30"))
 POST_SCHEDULE = os.getenv("POST_SCHEDULE", "09:00,15:00,21:00").split(",")
+PPV_PRICE_CENTS = int(os.getenv("PPV_PRICE_CENTS", "1500"))  # $15 default
 
 # Reddit
 REDDIT_CLIENT_ID = os.getenv("REDDIT_CLIENT_ID", "")

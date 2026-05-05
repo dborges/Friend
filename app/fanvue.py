@@ -103,6 +103,28 @@ def upload_media(file_path: str) -> str:
         return result.get("mediaUuid") or result.get("uuid")
 
 
+# ── Mass messages ────────────────────────────────────────────────────────────
+
+def send_mass_message(text: str, media_uuids: list[str] | None = None,
+                      price_cents: int | None = None) -> dict:
+    """Send a message to all current subscribers. Pass price_cents to make it PPV."""
+    payload: dict = {
+        "text": text,
+        "includedSmartListIds": ["subscribers"],
+    }
+    if media_uuids:
+        payload["mediaUuids"] = media_uuids
+    if price_cents:
+        payload["price"] = price_cents
+    with _client() as c:
+        resp = c.post(
+            f"{BASE_URL}/creators/{FANVUE_CREATOR_UUID}/chats/mass-messages",
+            json=payload,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+
 # ── Feed posts ────────────────────────────────────────────────────────────────
 
 def create_post(caption: str, media_uuids: list[str] | None = None) -> dict:

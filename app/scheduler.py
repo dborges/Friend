@@ -2,9 +2,12 @@ import logging
 import random
 from apscheduler.schedulers.background import BackgroundScheduler
 from app import fanvue, claude, flux, elevenlabs
-from app.database import SessionLocal, get_conversation_history, save_message, is_processed, SocialPost
+from app.database import (
+    SessionLocal, get_conversation_history, save_message, is_processed, SocialPost,
+    upsert_subscriber, get_unwelcomed, mark_welcome_sent, get_segment, set_segment,
+)
 from app.config import (
-    POLL_INTERVAL_SECONDS, POST_SCHEDULE,
+    POLL_INTERVAL_SECONDS, POST_SCHEDULE, PPV_PRICE_CENTS,
     REDDIT_CLIENT_ID, REDDIT_PROMO_SUBS, REDDIT_ORGANIC_SUBS,
     TWITTER_API_KEY, PROFILE_URL,
 )
@@ -24,6 +27,10 @@ def poll_and_reply():
 
             if not subscriber_id:
                 continue
+
+            upsert_subscriber(db, subscriber_id, user.get("handle", ""), subscriber_name)
+            segment = get_segment(db, subscriber_id)
+            subscriber_tier = "premium" if segment == "whale" else "standard"
 
             messages = fanvue.get_chat_messages(subscriber_id, limit=1)
             if not messages:
@@ -163,10 +170,55 @@ def post_to_twitter():
         log.error("Twitter post failed: %s", e)
 
 
+def welcome_new_subscribers():
+    """Detect new subscribers and send a personal welcome DM with a PPV hook."""
+    db = SessionLocal()
+    try:
+        fans = fanvue.get_fans(limit=50)
+        for fan in fans:
+            uuid = fan.get("uuid", "")
+            handle = fan.get("handle", "")
+            name = fan.get("displayName") or handle
+            if not uuid:
+                continue
+            upsert_subscriber(db, uuid, handle, name)
+
+        unwelcomed = get_unwelcomed(db)
+        for sub in unwelcomed:
+            try:
+                msg = claude.generate_welcome_message(sub.display_name or sub.handle)
+                fanvue.send_message(sub.subscriber_uuid, msg)
+                mark_welcome_sent(db, sub.subscriber_uuid)
+                log.info("Welcome sent to %s (%s)", sub.display_name, sub.subscriber_uuid)
+            except Exception as e:
+                log.error("Failed to welcome %s: %s", sub.subscriber_uuid, e)
+    except Exception as e:
+        log.error("welcome_new_subscribers error: %s", e)
+    finally:
+        db.close()
+
+
+def send_ppv_blast():
+    """Send a locked PPV mass message to all subscribers (2x/week)."""
+    try:
+        price_dollars = PPV_PRICE_CENTS // 100
+        text = claude.generate_ppv_pitch(price_dollars)
+        image_path = flux.generate_image("intimate lifestyle photo, soft lighting, Miami apartment")
+        media_uuid = fanvue.upload_media(image_path)
+        result = fanvue.send_mass_message(text, media_uuids=[media_uuid], price_cents=PPV_PRICE_CENTS)
+        log.info("PPV blast sent: %s", result)
+    except Exception as e:
+        log.error("PPV blast failed: %s", e)
+
+
 def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler()
 
     scheduler.add_job(poll_and_reply, "interval", seconds=POLL_INTERVAL_SECONDS, id="dm_poller")
+    scheduler.add_job(welcome_new_subscribers, "interval", minutes=5, id="welcome_poller")
+
+    # PPV blast — Wednesday and Saturday at 7pm
+    scheduler.add_job(send_ppv_blast, "cron", day_of_week="wed,sat", hour=19, minute=0, id="ppv_blast")
 
     for time_str in POST_SCHEDULE:
         hour, minute = time_str.strip().split(":")

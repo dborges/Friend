@@ -45,6 +45,48 @@ def generate_reply(
     }
 
 
+def generate_welcome_message(subscriber_name: str) -> str:
+    """Warm first DM sent the moment someone subscribes. Personal + immediate PPV hook."""
+    system_prompt = load_system_prompt(subscriber_name, "standard")
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=120,
+        temperature=0.9,
+        system=system_prompt,
+        messages=[{
+            "role": "user",
+            "content": (
+                f"Write a welcome DM to {subscriber_name or 'a new subscriber'} who just subscribed. "
+                "Be warm, slightly flirty, personal — make them feel special. "
+                "End with a soft tease that you have something exclusive waiting for them. "
+                "2-3 sentences max. No hashtags. Sound completely natural, not like a bot."
+            ),
+        }],
+    )
+    return response.content[0].text.strip()
+
+
+def generate_ppv_pitch(price_dollars: int = 15) -> str:
+    """Mass PPV message — teases locked content, creates urgency."""
+    system_prompt = load_system_prompt()
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=150,
+        temperature=0.9,
+        system=system_prompt,
+        messages=[{
+            "role": "user",
+            "content": (
+                f"Write a short PPV mass message as Heather to her Fanvue subscribers. "
+                f"The locked content costs ${price_dollars}. Tease what's inside without giving it away. "
+                "Create a little FOMO or curiosity. 2-3 sentences. Natural, not salesy. "
+                "No hashtags. End with something that makes them want to unlock it."
+            ),
+        }],
+    )
+    return response.content[0].text.strip()
+
+
 def generate_feed_caption() -> str:
     system_prompt = load_system_prompt()
     response = client.messages.create(
