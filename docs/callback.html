@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Authorization Complete</title>
+<style>
+  body { font-family: monospace; max-width: 800px; margin: 60px auto; padding: 0 20px; background: #f9f9f9; }
+  h2 { color: #333; }
+  .box { background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 20px; margin: 20px 0; word-break: break-all; }
+  .label { font-size: 0.8rem; color: #888; margin-bottom: 6px; }
+  .value { font-size: 1rem; color: #111; font-weight: bold; }
+  button { background: #111; color: #fff; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 0.9rem; margin-top: 10px; }
+  button:hover { background: #333; }
+  .success { color: green; } .error { color: red; }
+</style>
+</head>
+<body>
+  <h2>TikTok Authorization</h2>
+  <div id="output"></div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const code  = params.get('code');
+    const state = params.get('state');
+    const error = params.get('error');
+    const out   = document.getElementById('output');
+
+    if (error) {
+      out.innerHTML = `<p class="error">Error: ${error} — ${params.get('error_description') || ''}</p>`;
+    } else if (code) {
+      out.innerHTML = `
+        <p class="success">Authorization successful!</p>
+        <div class="box">
+          <div class="label">Authorization Code (copy this):</div>
+          <div class="value" id="code">${code}</div>
+          <button onclick="navigator.clipboard.writeText('${code}').then(()=>this.textContent='Copied!')">Copy Code</button>
+        </div>
+        <div class="box">
+          <div class="label">State:</div>
+          <div class="value">${state}</div>
+        </div>
+        <p>Paste this code into the terminal when prompted.</p>`;
+    } else {
+      out.innerHTML = '<p>No authorization data found in URL.</p>';
+    }
+  </script>
+</body>
+</html>

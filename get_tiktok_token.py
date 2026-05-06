@@ -8,7 +8,6 @@ Requires:
 - Client Key and Client Secret from the app dashboard
 """
 import base64, hashlib, json, os, re, secrets, urllib.parse, webbrowser
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import httpx
 from dotenv import load_dotenv
@@ -17,7 +16,7 @@ load_dotenv()
 
 CLIENT_KEY    = os.getenv("TIKTOK_CLIENT_KEY") or input("TikTok Client Key: ").strip()
 CLIENT_SECRET = os.getenv("TIKTOK_CLIENT_SECRET") or input("TikTok Client Secret: ").strip()
-REDIRECT_URI  = "http://localhost:8765/callback"
+REDIRECT_URI  = "https://dborges.github.io/Friend/callback.html"
 SCOPE         = "user.info.basic,video.publish,video.upload"
 
 code_verifier  = secrets.token_urlsafe(64)
@@ -25,19 +24,6 @@ code_challenge = base64.urlsafe_b64encode(
     hashlib.sha256(code_verifier.encode()).digest()
 ).rstrip(b"=").decode()
 state = secrets.token_urlsafe(16)
-
-captured = {}
-
-
-class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        captured.update(dict(urllib.parse.parse_qsl(urllib.parse.urlparse(self.path).query)))
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html")
-        self.end_headers()
-        self.wfile.write(b"<h2>Done. You can close this tab.</h2>")
-    def log_message(self, *a): pass
-
 
 def run():
     auth_url = (
@@ -53,10 +39,9 @@ def run():
 
     print("Opening TikTok authorization in your browser...")
     webbrowser.open(auth_url)
-    print("Waiting for callback on http://localhost:8765/callback ...")
-    HTTPServer(("localhost", 8765), Handler).handle_request()
-
-    code = captured.get("code", "")
+    print("\nAfter you authorize, you'll be redirected to a page showing your authorization code.")
+    print("Copy that code and paste it here.\n")
+    code = input("Paste authorization code: ").strip()
     if not code:
         print("No code received:", captured)
         return
