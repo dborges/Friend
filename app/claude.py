@@ -66,6 +66,28 @@ def generate_welcome_message(subscriber_name: str) -> str:
     return response.content[0].text.strip()
 
 
+def generate_tiktok_caption(scene_context: str = "", profile_url: str = "") -> str:
+    """Short TikTok caption — hook first, lifestyle, soft CTA. Under 150 chars."""
+    system_prompt = load_system_prompt()
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=80,
+        temperature=0.95,
+        system=system_prompt,
+        messages=[{
+            "role": "user",
+            "content": (
+                "Write a TikTok caption as Heather. "
+                f"Context: {scene_context or 'a Miami lifestyle moment'}. "
+                "Hook them in the first 3 words. Under 150 characters. "
+                "1-2 relevant hashtags max. Feels real, not like an ad."
+                + (f" Profile: {profile_url}" if profile_url else "")
+            ),
+        }],
+    )
+    return response.content[0].text.strip()
+
+
 def generate_threads_post(scene_context: str = "", profile_url: str = "") -> str:
     """Short Threads post — lifestyle, relatable, soft CTA. Under 400 chars."""
     system_prompt = load_system_prompt()

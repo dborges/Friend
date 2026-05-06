@@ -9,7 +9,7 @@ from app.database import (
 from app.config import (
     POLL_INTERVAL_SECONDS, POST_SCHEDULE, PPV_PRICE_CENTS,
     REDDIT_CLIENT_ID, REDDIT_PROMO_SUBS, REDDIT_ORGANIC_SUBS,
-    TWITTER_API_KEY, THREADS_ACCESS_TOKEN, PROFILE_URL,
+    TWITTER_API_KEY, THREADS_ACCESS_TOKEN, TIKTOK_ACCESS_TOKEN, PROFILE_URL,
 )
 
 log = logging.getLogger(__name__)
@@ -211,6 +211,34 @@ def send_ppv_blast():
         log.error("PPV blast failed: %s", e)
 
 
+def post_to_tiktok():
+    if not TIKTOK_ACCESS_TOKEN:
+        return
+    try:
+        from app import tiktok, video as video_mod
+        scenes = [
+            "morning yoga on a Miami balcony",
+            "iced coffee walk in Wynwood",
+            "beach day golden hour",
+            "sunset drive, windows down",
+            "getting ready, bathroom mirror selfie",
+        ]
+        scene = random.choice(scenes)
+        caption = claude.generate_tiktok_caption(scene, PROFILE_URL)
+        image_path = flux.generate_image(f"lifestyle photo, {scene}, natural light, candid")
+        video_path = video_mod.image_to_video(image_path, duration=8)
+        publish_id = tiktok.post_video(video_path, caption, privacy="PUBLIC_TO_EVERYONE")
+        db = SessionLocal()
+        try:
+            db.add(SocialPost(platform="tiktok", post_url=publish_id, caption=caption))
+            db.commit()
+        finally:
+            db.close()
+        log.info("TikTok posted: %s", publish_id)
+    except Exception as e:
+        log.error("TikTok post failed: %s", e)
+
+
 def post_to_threads():
     if not THREADS_ACCESS_TOKEN:
         return
@@ -266,6 +294,13 @@ def start_scheduler() -> BackgroundScheduler:
         scheduler.add_job(comment_on_reddit_organic, "cron", hour=14, minute=0,  id="reddit_organic_2")
         scheduler.add_job(comment_on_reddit_organic, "cron", hour=20, minute=0,  id="reddit_organic_3")
         log.info("Reddit jobs scheduled")
+
+    # TikTok — 3x/day (10am, 3pm, 9pm)
+    if TIKTOK_ACCESS_TOKEN:
+        scheduler.add_job(post_to_tiktok, "cron", hour=10, minute=0,  id="tiktok_1")
+        scheduler.add_job(post_to_tiktok, "cron", hour=15, minute=0,  id="tiktok_2")
+        scheduler.add_job(post_to_tiktok, "cron", hour=21, minute=0,  id="tiktok_3")
+        log.info("TikTok jobs scheduled")
 
     # Threads — 3x/day (9am, 2pm, 8pm)
     if THREADS_ACCESS_TOKEN:
