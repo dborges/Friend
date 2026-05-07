@@ -26,7 +26,40 @@
     .msg .meta { font-size: 11px; color: #555; margin-top: 4px; }
     .btn { background: #2a2a2a; border: 1px solid #333; color: #ccc; padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; }
     .btn:hover { background: #333; }
+    .btn.primary { background: #1a3a2a; border-color: #2d6a4a; color: #4ade80; }
+    .btn.primary:hover { background: #1f4a34; }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
     .actions { padding: 0 32px 24px; display: flex; gap: 12px; }
+    /* Image Studio */
+    .studio { padding: 24px 32px; border-top: 1px solid #1e1e1e; }
+    .studio h2 { font-size: 14px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 16px; }
+    .studio-body { display: grid; grid-template-columns: 340px 1fr; gap: 24px; align-items: start; }
+    .studio-controls { display: flex; flex-direction: column; gap: 12px; }
+    .studio-controls textarea { width: 100%; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 8px; color: #e5e5e5; font-size: 13px; padding: 12px; resize: vertical; min-height: 100px; font-family: inherit; line-height: 1.5; }
+    .studio-controls textarea:focus { outline: none; border-color: #3a3a3a; }
+    .presets { display: flex; flex-wrap: wrap; gap: 6px; }
+    .preset { background: #1a1a1a; border: 1px solid #2a2a2a; color: #888; padding: 4px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; }
+    .preset:hover { border-color: #3a3a3a; color: #ccc; }
+    .studio-result { display: flex; flex-direction: column; gap: 12px; }
+    .result-img { width: 100%; max-width: 360px; border-radius: 10px; border: 1px solid #2a2a2a; display: none; }
+    .result-img.visible { display: block; }
+    .spinner { display: none; align-items: center; gap: 10px; color: #666; font-size: 13px; }
+    .spinner.visible { display: flex; }
+    .spinner-ring { width: 18px; height: 18px; border: 2px solid #333; border-top-color: #4ade80; border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error-msg { color: #f87171; font-size: 13px; display: none; }
+    .error-msg.visible { display: block; }
+    /* Gallery */
+    .gallery { padding: 24px 32px; border-top: 1px solid #1e1e1e; }
+    .gallery h2 { font-size: 14px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 16px; }
+    .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+    .gallery-grid img { width: 100%; aspect-ratio: 2/3; object-fit: cover; border-radius: 8px; border: 1px solid #222; cursor: pointer; transition: border-color .15s; }
+    .gallery-grid img:hover { border-color: #4ade80; }
+    /* Lightbox */
+    .lightbox { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 100; align-items: center; justify-content: center; }
+    .lightbox.open { display: flex; }
+    .lightbox img { max-height: 90vh; max-width: 90vw; border-radius: 10px; border: 1px solid #333; }
+    .lightbox-close { position: absolute; top: 20px; right: 24px; font-size: 24px; color: #888; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -105,11 +138,121 @@
     .msg .role.twitter { background: #0e1d2d; color: #1d9bf0; }
   </style>
 
+  <!-- Image Studio -->
+  <div class="studio">
+    <h2>Image Studio</h2>
+    <div class="studio-body">
+      <div class="studio-controls">
+        <textarea id="scene-input" placeholder="Describe the scene… e.g. 'close-up selfie at the beach, golden hour, wind in hair'"></textarea>
+        <div class="presets">
+          <span class="preset" onclick="setScene('close-up portrait, soft natural window light, direct eye contact')">Portrait</span>
+          <span class="preset" onclick="setScene('at the beach, Miami, wind-blown hair, candid, golden hour')">Beach</span>
+          <span class="preset" onclick="setScene('rooftop bar, evening light, cocktail in hand, city behind her')">Rooftop</span>
+          <span class="preset" onclick="setScene('mirror selfie, casual outfit, bedroom, afternoon light')">Mirror selfie</span>
+          <span class="preset" onclick="setScene('post-yoga, workout clothes, messy bun, balcony, morning light')">Post-yoga</span>
+          <span class="preset" onclick="setScene('sitting at a cafe, iced coffee, looking at phone, candid')">Cafe</span>
+          <span class="preset" onclick="setScene('couch at home with her cat, lazy sunday, natural light')">At home</span>
+          <span class="preset" onclick="setScene('walking on Miami sidewalk, sundress, palm trees, squinting in sun')">Street</span>
+        </div>
+        <button class="btn primary" id="gen-btn" onclick="generateImage()">Generate Image</button>
+      </div>
+      <div class="studio-result">
+        <div class="spinner" id="spinner"><div class="spinner-ring"></div> Generating — this takes ~20s…</div>
+        <div class="error-msg" id="error-msg"></div>
+        <img class="result-img" id="result-img" onclick="openLightbox(this.src)" />
+        <a class="btn" id="download-btn" style="display:none;text-align:center;text-decoration:none;" download>Download</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Gallery -->
+  <div class="gallery">
+    <h2>Generated Images</h2>
+    <div class="gallery-grid" id="gallery-grid">
+      <p style="color:#555;font-size:13px;grid-column:1/-1;">Loading…</p>
+    </div>
+  </div>
+
+  <!-- Lightbox -->
+  <div class="lightbox" id="lightbox" onclick="closeLightbox()">
+    <span class="lightbox-close" onclick="closeLightbox()">✕</span>
+    <img id="lightbox-img" src="" />
+  </div>
+
   <script>
     async function reloadPersona() {
       await fetch("/dashboard/persona/reload", { method: "POST" });
       alert("Persona reloaded from markdown files.");
     }
+
+    function setScene(text) {
+      document.getElementById("scene-input").value = text;
+    }
+
+    async function generateImage() {
+      const scene = document.getElementById("scene-input").value.trim();
+      const btn = document.getElementById("gen-btn");
+      const spinner = document.getElementById("spinner");
+      const resultImg = document.getElementById("result-img");
+      const errorMsg = document.getElementById("error-msg");
+      const downloadBtn = document.getElementById("download-btn");
+
+      btn.disabled = true;
+      spinner.classList.add("visible");
+      errorMsg.classList.remove("visible");
+      resultImg.classList.remove("visible");
+      downloadBtn.style.display = "none";
+
+      try {
+        const resp = await fetch("/dashboard/generate-image", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scene }),
+        });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+
+        resultImg.src = data.url + "?t=" + Date.now();
+        resultImg.classList.add("visible");
+        downloadBtn.href = data.url;
+        downloadBtn.download = data.filename;
+        downloadBtn.style.display = "block";
+        loadGallery();
+      } catch (e) {
+        errorMsg.textContent = "Error: " + e.message;
+        errorMsg.classList.add("visible");
+      } finally {
+        btn.disabled = false;
+        spinner.classList.remove("visible");
+      }
+    }
+
+    async function loadGallery() {
+      const resp = await fetch("/dashboard/generated-images");
+      const data = await resp.json();
+      const grid = document.getElementById("gallery-grid");
+      if (!data.images.length) {
+        grid.innerHTML = '<p style="color:#555;font-size:13px;grid-column:1/-1;">No images yet — generate one above.</p>';
+        return;
+      }
+      grid.innerHTML = data.images.map(url =>
+        `<img src="${url}?t=${Date.now()}" loading="lazy" onclick="openLightbox('${url}')" />`
+      ).join("");
+    }
+
+    function openLightbox(src) {
+      document.getElementById("lightbox-img").src = src;
+      document.getElementById("lightbox").classList.add("open");
+    }
+
+    function closeLightbox() {
+      document.getElementById("lightbox").classList.remove("open");
+    }
+
+    document.addEventListener("keydown", e => { if (e.key === "Escape") closeLightbox(); });
+
+    // Load gallery on page load
+    loadGallery();
   </script>
 </body>
 </html>
