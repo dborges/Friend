@@ -1,7 +1,7 @@
 import logging
 import random
 from apscheduler.schedulers.background import BackgroundScheduler
-from app import fanvue, claude, flux, elevenlabs
+from app import fanvue, claude, flux, elevenlabs, video as video_mod
 from app.database import (
     SessionLocal, get_conversation_history, save_message, is_processed, SocialPost,
     upsert_subscriber, get_unwelcomed, mark_welcome_sent, get_segment, set_segment,
@@ -10,6 +10,7 @@ from app.config import (
     POLL_INTERVAL_SECONDS, POST_SCHEDULE, PPV_PRICE_CENTS,
     REDDIT_CLIENT_ID, REDDIT_PROMO_SUBS, REDDIT_ORGANIC_SUBS,
     TWITTER_API_KEY, THREADS_ACCESS_TOKEN, TIKTOK_ACCESS_TOKEN, PROFILE_URL,
+    ONLYFANS_API_KEY,
 )
 
 log = logging.getLogger(__name__)
@@ -54,7 +55,15 @@ def poll_and_reply():
             reply_text = result["text"]
             media_ids: list[str] = []
 
-            if result["wants_image"]:
+            if result["wants_video"]:
+                try:
+                    image_path = flux.generate_image()
+                    video_path = video_mod.generate_video(image_path)
+                    media_id = fanvue.upload_media(video_path)
+                    media_ids.append(media_id)
+                except Exception as e:
+                    log.error("Video generation failed: %s", e)
+            elif result["wants_image"]:
                 try:
                     image_path = flux.generate_image()
                     media_id = fanvue.upload_media(image_path)
@@ -266,6 +275,129 @@ def post_to_threads():
         log.error("Threads post failed: %s", e)
 
 
+def poll_and_reply_onlyfans():
+    if not ONLYFANS_API_KEY:
+        return
+    db = SessionLocal()
+    try:
+        from app import onlyfans
+        chats = onlyfans.get_chats()
+        for chat in chats:
+            chat_id = str(chat.get("id") or chat.get("userId") or chat.get("fan_id", ""))
+            subscriber_name = (
+                chat.get("userName") or chat.get("name") or chat.get("username", "")
+            )
+            if not chat_id:
+                continue
+
+            upsert_subscriber(db, chat_id, subscriber_name, subscriber_name)
+            segment = get_segment(db, chat_id)
+            subscriber_tier = "premium" if segment == "whale" else "standard"
+
+            messages = onlyfans.get_chat_messages(chat_id, limit=1)
+            if not messages:
+                continue
+
+            latest = messages[0]
+            message_id = f"of_{chat_id}_{latest.get('id') or latest.get('message_id', '')}"
+            content = (latest.get("text") or latest.get("content") or "").strip()
+
+            if not content:
+                continue
+            if is_processed(db, message_id):
+                continue
+
+            save_message(db, message_id, chat_id, subscriber_name,
+                         subscriber_tier, "user", content)
+
+            history = get_conversation_history(db, chat_id)
+            result = claude.generate_reply(subscriber_name, subscriber_tier, history[:-1], content)
+            reply_text = result["text"]
+            media_ids: list[str] = []
+
+            if result["wants_video"]:
+                try:
+                    image_path = flux.generate_image()
+                    video_path = video_mod.generate_video(image_path)
+                    media_ids.append(onlyfans.upload_media(video_path))
+                except Exception as e:
+                    log.error("OF video generation failed: %s", e)
+            elif result["wants_image"]:
+                try:
+                    image_path = flux.generate_image()
+                    media_ids.append(onlyfans.upload_media(image_path))
+                except Exception as e:
+                    log.error("OF image generation failed: %s", e)
+
+            if result["wants_voice"]:
+                try:
+                    audio_path = elevenlabs.generate_voice(reply_text)
+                    media_ids.append(onlyfans.upload_media(audio_path))
+                except Exception as e:
+                    log.error("OF voice generation failed: %s", e)
+
+            try:
+                if media_ids:
+                    sent = onlyfans.send_message_with_media(chat_id, reply_text, media_ids)
+                else:
+                    sent = onlyfans.send_message(chat_id, reply_text)
+                reply_id = f"of_reply_{message_id}"
+                save_message(db, reply_id, chat_id, subscriber_name,
+                             subscriber_tier, "assistant", reply_text)
+                log.info("OF replied to %s", subscriber_name)
+            except Exception as e:
+                log.error("OF failed to send reply to %s: %s", chat_id, e)
+
+    except Exception as e:
+        log.error("OF poll cycle error: %s", e)
+    finally:
+        db.close()
+
+
+def welcome_new_onlyfans_subscribers():
+    if not ONLYFANS_API_KEY:
+        return
+    db = SessionLocal()
+    try:
+        from app import onlyfans
+        fans = onlyfans.get_fans(limit=50)
+        for fan in fans:
+            fan_id = str(fan.get("id") or fan.get("userId", ""))
+            handle = fan.get("username") or fan.get("name", "")
+            name = fan.get("name") or handle
+            if not fan_id:
+                continue
+            upsert_subscriber(db, fan_id, handle, name)
+
+        unwelcomed = get_unwelcomed(db)
+        for sub in unwelcomed:
+            try:
+                msg = claude.generate_welcome_message(sub.display_name or sub.handle)
+                onlyfans.send_message(sub.subscriber_uuid, msg)
+                mark_welcome_sent(db, sub.subscriber_uuid)
+                log.info("OF welcome sent to %s", sub.display_name)
+            except Exception as e:
+                log.error("OF failed to welcome %s: %s", sub.subscriber_uuid, e)
+    except Exception as e:
+        log.error("OF welcome_new_subscribers error: %s", e)
+    finally:
+        db.close()
+
+
+def post_to_onlyfans_feed():
+    if not ONLYFANS_API_KEY:
+        return
+    try:
+        from app import onlyfans
+        caption = claude.generate_feed_caption()
+        image_path = flux.generate_image("lifestyle photo, Miami, golden hour, casual and candid")
+        media_id = onlyfans.upload_media(image_path)
+        result = onlyfans.create_post(caption, [media_id])
+        log.info("Posted to OnlyFans feed: %s", result)
+    except Exception as e:
+        log.error("OnlyFans feed post failed: %s", e)
+
+
 def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler()
 
@@ -315,6 +447,15 @@ def start_scheduler() -> BackgroundScheduler:
         scheduler.add_job(post_to_twitter, "cron", hour=13, minute=0,  id="twitter_2")
         scheduler.add_job(post_to_twitter, "cron", hour=20, minute=30, id="twitter_3")
         log.info("Twitter jobs scheduled")
+
+    # OnlyFans — DM polling, welcome flow, feed posts (offset from Fanvue times)
+    if ONLYFANS_API_KEY:
+        scheduler.add_job(poll_and_reply_onlyfans, "interval", seconds=POLL_INTERVAL_SECONDS, id="of_dm_poller")
+        scheduler.add_job(welcome_new_onlyfans_subscribers, "interval", minutes=5, id="of_welcome_poller")
+        scheduler.add_job(post_to_onlyfans_feed, "cron", hour=10, minute=30, id="of_feed_1")
+        scheduler.add_job(post_to_onlyfans_feed, "cron", hour=16, minute=0,  id="of_feed_2")
+        scheduler.add_job(post_to_onlyfans_feed, "cron", hour=21, minute=30, id="of_feed_3")
+        log.info("OnlyFans jobs scheduled")
 
     scheduler.start()
     log.info("Scheduler started — polling every %ds, posting at %s", POLL_INTERVAL_SECONDS, POST_SCHEDULE)

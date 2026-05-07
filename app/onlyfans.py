@@ -8,6 +8,10 @@ _HEADERS = {
     "Content-Type": "application/json",
 }
 
+# Prepended to every post per OnlyFans AI disclosure policy.
+# Must appear at the start of content, not buried in hashtags.
+AI_DISCLOSURE = "[AI-Generated Content] #AIGenerated #AICreator"
+
 
 def _url(path: str) -> str:
     return f"{BASE_URL}/{ONLYFANS_ACCOUNT_ID}{path}"
@@ -75,11 +79,26 @@ def upload_media_from_url(url: str) -> str:
 # ── Feed posts ────────────────────────────────────────────────────────────────
 
 def create_post(caption: str, media_ids: list[str] | None = None) -> dict:
-    payload: dict = {"text": caption}
+    full_text = f"{AI_DISCLOSURE}\n\n{caption}"
+    payload: dict = {"text": full_text}
     if media_ids:
         payload["mediaFiles"] = media_ids
     with _client() as c:
         resp = c.post(_url("/posts"), json=payload)
+        resp.raise_for_status()
+        return resp.json()
+
+
+def send_mass_message(text: str, media_ids: list[str] | None = None, price_cents: int = 0) -> dict:
+    """Send a PPV mass message to all subscribers."""
+    full_text = f"{AI_DISCLOSURE}\n\n{text}"
+    payload: dict = {"text": full_text}
+    if media_ids:
+        payload["mediaFiles"] = media_ids
+    if price_cents:
+        payload["price"] = price_cents / 100
+    with _client() as c:
+        resp = c.post(_url("/messages/mass"), json=payload)
         resp.raise_for_status()
         return resp.json()
 

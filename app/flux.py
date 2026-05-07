@@ -9,13 +9,47 @@ os.environ["REPLICATE_API_TOKEN"] = REPLICATE_API_TOKEN
 _APPEARANCE = None
 _LORA_MODEL = os.getenv("LORA_MODEL", "")
 
-_CANDID_STYLES = [
-    "shot on iPhone, slightly grainy, natural imperfect lighting",
-    "casual phone selfie, unposed, real person vibe",
-    "candid snapshot, not a photoshoot, authentic moment",
-    "amateur phone camera, slightly overexposed, natural",
-    "instagram selfie style, informal, genuine expression",
+# Camera/lens descriptors that push Flux toward photographic realism
+_CAMERA_STYLES = [
+    "shot on iPhone 15 Pro, natural light, slight lens flare, shallow depth of field",
+    "candid photo, Sony a7III, 50mm f/1.8, bokeh background, true-to-life colors",
+    "casual selfie, front camera, slightly grainy sensor noise, fluorescent bathroom light",
+    "shot by a friend, Canon EOS R, 35mm, unposed, mid-conversation moment",
+    "Instagram Story capture, overexposed highlights, warm golden hour window light",
+    "phone camera, slightly motion-blurred background, crisp subject, real skin texture",
+    "candid outdoor shot, dappled sunlight through trees, slight chromatic aberration",
+    "mirror selfie, phone visible in frame, natural bathroom lighting, slightly overexposed",
+    "low-angle friend selfie, cloudy outdoor light, no flash, natural shadow under chin",
+    "caught mid-laugh, portrait mode, slight edge blur artifact, natural hair flyaways",
 ]
+
+# Scene contexts grounded in Heather's Miami life
+_DEFAULT_SCENES = [
+    "sitting at a cafe in Miami, iced coffee on the table, casual afternoon",
+    "mirror selfie at home, crop top and jeans, bedroom in background slightly messy",
+    "at the beach, hair wind-blown, not posing, looking away at something",
+    "couch at home with her cat, lazy Sunday afternoon, natural window light",
+    "standing in her kitchen, cooking something, glancing at camera over shoulder",
+    "walking on a Miami sidewalk, palm trees in background, squinting slightly in sun",
+    "at a rooftop bar, golden hour, cocktail in hand, laughing at something offscreen",
+    "post-yoga, workout clothes, hair up messy, slightly flushed, genuine smile",
+    "sitting on apartment balcony, evening light, casual t-shirt, relaxed expression",
+    "at a friend's house, group setting implied, looking at phone, candid moment",
+]
+
+# Realism anchors — included in every non-LoRA prompt
+_REALISM_ANCHORS = (
+    "real person, natural skin texture with pores and fine lines, "
+    "authentic expression, slight asymmetry, no retouching, "
+    "photojournalistic quality, not a model, not a photoshoot"
+)
+
+# Concepts to steer away from — passed as negative prompt where supported
+_NEGATIVE_PROMPT = (
+    "painting, illustration, anime, cgi, render, 3d, plastic skin, "
+    "overly smooth, airbrushed, symmetrical, studio lighting, glamour shot, "
+    "watermark, signature, perfect teeth, artificial bokeh, oversaturated"
+)
 
 
 def _get_appearance() -> str:
@@ -31,41 +65,50 @@ def _get_appearance() -> str:
                 _APPEARANCE = " ".join(block.strip().splitlines()[1:]).strip()
                 break
         if not _APPEARANCE:
-            _APPEARANCE = "young woman, dark hair, warm brown eyes, casual style"
+            _APPEARANCE = "tall athletic woman, long dark hair, warm brown eyes, casual style"
     return _APPEARANCE
 
 
-def generate_image_url(scene_context: str = "mirror selfie at home, casual outfit") -> tuple[str, str]:
-    """Like generate_image() but also returns the Replicate public URL.
-    Returns (local_path, public_url). URL is valid ~24h — enough for Threads posting."""
-    lora_model = os.getenv("LORA_MODEL", _LORA_MODEL)
-    candid_style = random.choice(_CANDID_STYLES)
+def _build_prompt(scene_context: str) -> str:
+    appearance = _get_appearance()
+    camera = random.choice(_CAMERA_STYLES)
+    return (
+        f"24-year-old woman, {appearance}, {scene_context}, "
+        f"{camera}, {_REALISM_ANCHORS}"
+    )
 
-    if lora_model:
-        if ":" not in lora_model:
-            model = replicate.models.get(lora_model)
-            lora_ref = f"{lora_model}:{model.latest_version.id}"
-        else:
-            lora_ref = lora_model
-        prompt = f"HEATHER, {scene_context}, {candid_style}"
-        output = replicate.run(lora_ref, input={
-            "prompt": prompt, "aspect_ratio": "2:3", "output_format": "jpg",
-            "lora_scale": 1.0, "num_inference_steps": 28, "guidance_scale": 3.5,
-        })
-    else:
-        appearance = _get_appearance()
-        prompt = (
-            f"young woman, {appearance}, {scene_context}, {candid_style}, "
-            "not a model, real person, no studio lighting"
-        )
-        output = replicate.run(
-            "black-forest-labs/flux-1.1-pro",
-            input={"prompt": prompt, "aspect_ratio": "2:3", "output_format": "jpg"},
-        )
 
+def _run_flux(prompt: str) -> object:
+    return replicate.run(
+        "black-forest-labs/flux-1.1-pro",
+        input={
+            "prompt": prompt,
+            "aspect_ratio": "2:3",
+            "output_format": "jpg",
+            "output_quality": 95,
+            "prompt_upsampling": True,
+        },
+    )
+
+
+def _run_lora(lora_ref: str, prompt: str) -> object:
+    return replicate.run(
+        lora_ref,
+        input={
+            "prompt": prompt,
+            "aspect_ratio": "2:3",
+            "output_format": "jpg",
+            "output_quality": 95,
+            "lora_scale": 0.85,
+            "num_inference_steps": 32,
+            "guidance_scale": 3.5,
+        },
+    )
+
+
+def _save_output(output) -> tuple[str, str]:
     filename = f"image_{os.urandom(6).hex()}.jpg"
     dest = os.path.join(GENERATED_DIR, filename)
-
     if isinstance(output, list):
         file_output = output[0]
         public_url = str(file_output)
@@ -78,58 +121,48 @@ def generate_image_url(scene_context: str = "mirror selfie at home, casual outfi
             resp.raise_for_status()
             with open(dest, "wb") as f:
                 f.write(resp.content)
-
     return dest, public_url
 
 
-def generate_image(scene_context: str = "mirror selfie at home, casual outfit") -> str:
+def generate_image_url(scene_context: str = "") -> tuple[str, str]:
+    """Returns (local_path, public_url). URL valid ~24h — enough for Threads posting."""
+    if not scene_context:
+        scene_context = random.choice(_DEFAULT_SCENES)
+
     lora_model = os.getenv("LORA_MODEL", _LORA_MODEL)
-    candid_style = random.choice(_CANDID_STYLES)
 
     if lora_model:
-        # Resolve to versioned ref if no version pinned
         if ":" not in lora_model:
             model = replicate.models.get(lora_model)
             lora_ref = f"{lora_model}:{model.latest_version.id}"
         else:
             lora_ref = lora_model
-
-        prompt = f"HEATHER, {scene_context}, {candid_style}"
-        output = replicate.run(
-            lora_ref,
-            input={
-                "prompt": prompt,
-                "aspect_ratio": "2:3",
-                "output_format": "jpg",
-                "lora_scale": 1.0,
-                "num_inference_steps": 28,
-                "guidance_scale": 3.5,
-            },
-        )
+        camera = random.choice(_CAMERA_STYLES)
+        prompt = f"HEATHER, {scene_context}, {camera}, {_REALISM_ANCHORS}"
+        output = _run_lora(lora_ref, prompt)
     else:
-        appearance = _get_appearance()
-        prompt = (
-            f"young woman, {appearance}, {scene_context}, {candid_style}, "
-            "not a model, real person, no studio lighting"
-        )
-        output = replicate.run(
-            "black-forest-labs/flux-1.1-pro",
-            input={"prompt": prompt, "aspect_ratio": "2:3", "output_format": "jpg"},
-        )
+        output = _run_flux(_build_prompt(scene_context))
 
-    filename = f"image_{os.urandom(6).hex()}.jpg"
-    dest = os.path.join(GENERATED_DIR, filename)
+    return _save_output(output)
 
-    # LoRA model returns list of FileOutput; flux-1.1-pro returns a URL string
-    if isinstance(output, list):
-        file_output = output[0]
-        with open(dest, "wb") as f:
-            f.write(file_output.read())
+
+def generate_image(scene_context: str = "") -> str:
+    if not scene_context:
+        scene_context = random.choice(_DEFAULT_SCENES)
+
+    lora_model = os.getenv("LORA_MODEL", _LORA_MODEL)
+
+    if lora_model:
+        if ":" not in lora_model:
+            model = replicate.models.get(lora_model)
+            lora_ref = f"{lora_model}:{model.latest_version.id}"
+        else:
+            lora_ref = lora_model
+        camera = random.choice(_CAMERA_STYLES)
+        prompt = f"HEATHER, {scene_context}, {camera}, {_REALISM_ANCHORS}"
+        output = _run_lora(lora_ref, prompt)
     else:
-        with httpx.Client() as client:
-            resp = client.get(str(output), timeout=60)
-            resp.raise_for_status()
-            with open(dest, "wb") as f:
-                f.write(resp.content)
+        output = _run_flux(_build_prompt(scene_context))
 
+    dest, _ = _save_output(output)
     return dest

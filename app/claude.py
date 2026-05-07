@@ -13,6 +13,10 @@ VOICE_TRIGGERS = re.compile(
     r"\b(voice note|voice message|audio|hear your voice|say that|record)\b",
     re.IGNORECASE,
 )
+VIDEO_TRIGGERS = re.compile(
+    r"\b(send me a video|video of you|can i see you move|clip of you|short video|video message|reel)\b",
+    re.IGNORECASE,
+)
 
 
 def generate_reply(
@@ -37,11 +41,13 @@ def generate_reply(
 
     wants_image = bool(IMAGE_TRIGGERS.search(new_message))
     wants_voice = bool(VOICE_TRIGGERS.search(new_message))
+    wants_video = bool(VIDEO_TRIGGERS.search(new_message))
 
     return {
         "text": reply_text,
         "wants_image": wants_image,
         "wants_voice": wants_voice,
+        "wants_video": wants_video,
     }
 
 
